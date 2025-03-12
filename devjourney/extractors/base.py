@@ -37,6 +37,30 @@ class BaseExtractor(ABC):
         """
         pass
     
+    def extract_conversations(self, start_date: datetime, end_date: Optional[datetime] = None) -> List[Conversation]:
+        """
+        Extract conversations between start_date and end_date.
+        
+        Args:
+            start_date: Start date for extraction
+            end_date: End date for extraction (defaults to now)
+            
+        Returns:
+            List of extracted conversations
+        """
+        self.logger.info(f"Extracting conversations from {start_date.isoformat()} to {end_date.isoformat() if end_date else 'now'}")
+        conversations = self.extract(since=start_date)
+        
+        # Filter by end date if provided
+        if end_date:
+            conversations = [
+                conv for conv in conversations 
+                if conv.start_time <= end_date
+            ]
+        
+        self._log_extraction_stats(conversations)
+        return conversations
+    
     @abstractmethod
     def is_available(self) -> bool:
         """
@@ -74,4 +98,15 @@ class BaseExtractor(ABC):
         self.logger.info(
             f"Extracted {len(conversations)} conversations with {total_messages} messages "
             f"from {earliest.isoformat()} to {latest.isoformat()}"
-        ) 
+        )
+        
+    def set_file_path(self, file_path: str) -> None:
+        """
+        Set the file path for file-based extractors.
+        
+        Args:
+            file_path: Path to the file containing conversations
+        """
+        # This is a default implementation that does nothing
+        # Subclasses should override this method if they support file-based extraction
+        self.logger.warning(f"File-based extraction not supported by {self.__class__.__name__}") 

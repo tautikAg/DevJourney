@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import sys
 import logging
-from typing import Any
+from typing import Any, Dict
 import click
 import argparse
 from pathlib import Path
@@ -90,15 +90,15 @@ def sync(force: bool) -> None:
     console.print("[bold]Manually triggering Notion sync...[/bold]")
     result = sync_to_notion(force=force)
     
-    match result:
-        case {"success": True, "items_synced": items_synced, **rest}:
-            console.print(f"[bold green]Sync completed successfully![/bold green]")
-            console.print(f"Items synced: {items_synced}")
-            if "message" in rest:
-                console.print(f"Message: {rest['message']}")
-        case {"success": False, "error": error}:
-            console.print(f"[bold red]Sync failed![/bold red]")
-            console.print(f"Error: {error}")
+    # Using if-else instead of match statement for better compatibility
+    if result.get("success", False):
+        console.print(f"[bold green]Sync completed successfully![/bold green]")
+        console.print(f"Items synced: {result.get('items_synced', 0)}")
+        if "message" in result:
+            console.print(f"Message: {result['message']}")
+    else:
+        console.print(f"[bold red]Sync failed![/bold red]")
+        console.print(f"Error: {result.get('error', 'Unknown error')}")
 
 
 @cli.command()
