@@ -4,9 +4,12 @@ DevJourney - A personal progress tracking system.
 
 This module serves as the main entry point for the DevJourney application.
 """
+from __future__ import annotations
+
 import os
 import sys
 import logging
+from typing import Any
 import click
 import argparse
 from pathlib import Path
@@ -32,13 +35,13 @@ console = Console()
 
 @click.group()
 @click.version_option(version="0.1.0")
-def cli():
+def cli() -> None:
     """DevJourney - Track your development progress from AI conversations."""
     pass
 
 
 @cli.command()
-def setup():
+def setup() -> None:
     """Run the setup wizard to configure DevJourney."""
     from devjourney.ui.setup_wizard import run_setup_wizard
     console.print("[bold green]Starting DevJourney setup wizard...[/bold green]")
@@ -47,7 +50,7 @@ def setup():
 
 @cli.command()
 @click.option("--headless", is_flag=True, help="Run in headless mode without UI")
-def start(headless):
+def start(headless: bool) -> None:
     """Start the DevJourney application."""
     if headless:
         console.print("[bold green]Starting DevJourney in headless mode...[/bold green]")
@@ -62,7 +65,7 @@ def start(headless):
 
 
 @cli.command()
-def status():
+def status() -> None:
     """Check the status of DevJourney services."""
     from devjourney.utils.service_manager import check_status
     status_info = check_status()
@@ -80,24 +83,27 @@ def status():
 
 @cli.command()
 @click.option("--force", is_flag=True, help="Force sync even if not scheduled")
-def sync(force):
+def sync(force: bool) -> None:
     """Manually trigger a sync with Notion."""
     from devjourney.notion.sync import sync_to_notion
     
     console.print("[bold]Manually triggering Notion sync...[/bold]")
     result = sync_to_notion(force=force)
     
-    if result["success"]:
-        console.print(f"[bold green]Sync completed successfully![/bold green]")
-        console.print(f"Items synced: {result['items_synced']}")
-    else:
-        console.print(f"[bold red]Sync failed![/bold red]")
-        console.print(f"Error: {result['error']}")
+    match result:
+        case {"success": True, "items_synced": items_synced, **rest}:
+            console.print(f"[bold green]Sync completed successfully![/bold green]")
+            console.print(f"Items synced: {items_synced}")
+            if "message" in rest:
+                console.print(f"Message: {rest['message']}")
+        case {"success": False, "error": error}:
+            console.print(f"[bold red]Sync failed![/bold red]")
+            console.print(f"Error: {error}")
 
 
 @cli.command()
 @click.option("--days", default=7, help="Number of days to analyze")
-def analyze(days):
+def analyze(days: int) -> None:
     """Analyze recent conversations without syncing to Notion."""
     from devjourney.analyzers.analyzer import analyze_recent_conversations
     
@@ -112,14 +118,14 @@ def analyze(days):
 
 
 @cli.group()
-def notion():
+def notion() -> None:
     """Notion integration commands."""
     pass
 
 
 @notion.command()
 @click.option("--parent-page-id", required=True, help="Parent page ID to create databases in")
-def setup_notion(parent_page_id):
+def setup_notion(parent_page_id: str) -> None:
     """Set up Notion integration."""
     from devjourney.notion.service import NotionService
     
@@ -141,7 +147,7 @@ def setup_notion(parent_page_id):
               help="Source to extract conversations from")
 @click.option("--days", default=1, type=int, help="Number of days to analyze")
 @click.option("--file-path", help="Path to file containing conversations (only for file source)")
-def sync_notion(parent_page_id, source, days, file_path):
+def sync_notion(parent_page_id: str, source: str, days: int, file_path: str | None) -> None:
     """Sync data to Notion."""
     from devjourney.extractors.factory import create_extractor
     from devjourney.analyzers.analyzer import ConversationAnalyzer
@@ -193,7 +199,7 @@ def sync_notion(parent_page_id, source, days, file_path):
 
 
 @notion.command()
-def test_notion():
+def test_notion() -> None:
     """Test Notion connection."""
     from devjourney.notion.service import NotionService
     
@@ -208,7 +214,7 @@ def test_notion():
         console.print(f"[bold red]Error testing Notion connection:[/bold red] {str(e)}")
 
 
-def main():
+def main() -> None:
     """Main entry point for the application."""
     try:
         cli()

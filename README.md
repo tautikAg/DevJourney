@@ -82,7 +82,7 @@ notion:
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.12+
 - Notion account
 - Claude API access (optional)
 - Ollama with Deepseek-r1 model (recommended for local processing)
