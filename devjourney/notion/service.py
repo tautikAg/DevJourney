@@ -1,6 +1,3 @@
-git zdd """
-Notion integration service for DevJourney.
-"""
 import logging
 import os
 from datetime import datetime, timedelta

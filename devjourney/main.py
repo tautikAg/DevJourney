@@ -8,11 +8,13 @@ import os
 import sys
 import logging
 import click
+import argparse
 from pathlib import Path
 from rich.console import Console
 from rich.logging import RichHandler
 
 from devjourney.config.settings import config, CONFIG_DIR, LOG_DIR
+from devjourney.cli.notion_commands import setup_notion_parser, handle_notion_command
 
 # Set up logging
 log_file = LOG_DIR / "devjourney.log"
@@ -107,6 +109,103 @@ def analyze(days):
     console.print(f"Problems identified: {result['problems_identified']}")
     console.print(f"Learnings extracted: {result['learnings_extracted']}")
     console.print(f"Code references found: {result['code_references']}")
+
+
+@cli.group()
+def notion():
+    """Notion integration commands."""
+    pass
+
+
+@notion.command()
+@click.option("--parent-page-id", required=True, help="Parent page ID to create databases in")
+def setup_notion(parent_page_id):
+    """Set up Notion integration."""
+    from devjourney.notion.service import NotionService
+    
+    console.print("[bold]Setting up Notion integration...[/bold]")
+    try:
+        notion_service = NotionService()
+        database_ids = notion_service.setup_databases(parent_page_id)
+        
+        console.print(f"[bold green]Set up {len(database_ids)} databases in Notion![/bold green]")
+        for name, db_id in database_ids.items():
+            console.print(f"  {name}: {db_id}")
+    except Exception as e:
+        console.print(f"[bold red]Error setting up Notion integration:[/bold red] {str(e)}")
+
+
+@notion.command()
+@click.option("--parent-page-id", required=True, help="Parent page ID to create databases in if needed")
+@click.option("--source", type=click.Choice(["cursor", "vscode", "file"]), default="cursor", 
+              help="Source to extract conversations from")
+@click.option("--days", default=1, type=int, help="Number of days to analyze")
+@click.option("--file-path", help="Path to file containing conversations (only for file source)")
+def sync_notion(parent_page_id, source, days, file_path):
+    """Sync data to Notion."""
+    from devjourney.extractors.factory import create_extractor
+    from devjourney.analyzers.analyzer import ConversationAnalyzer
+    from devjourney.notion.service import NotionService
+    from datetime import datetime, timedelta
+    
+    console.print("[bold]Syncing data to Notion...[/bold]")
+    try:
+        # Create extractor
+        extractor = create_extractor(source)
+        if not extractor:
+            console.print(f"[bold red]Unknown source:[/bold red] {source}")
+            return
+        
+        # Configure extractor
+        if source == "file" and file_path:
+            extractor.set_file_path(file_path)
+        
+        # Extract conversations
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
+        
+        console.print(f"Extracting conversations from {start_date.date()} to {end_date.date()}")
+        conversations = extractor.extract_conversations(start_date, end_date)
+        
+        if not conversations:
+            console.print("[bold yellow]No conversations found[/bold yellow]")
+            return
+        
+        console.print(f"Extracted {len(conversations)} conversations")
+        
+        # Analyze conversations
+        analyzer = ConversationAnalyzer()
+        result = analyzer.analyze_conversations(conversations)
+        
+        # Sync to Notion
+        notion_service = NotionService()
+        created_pages = notion_service.sync_analysis_result(result, parent_page_id)
+        
+        # Log results
+        total_pages = sum(len(pages) for pages in created_pages.values())
+        console.print(f"[bold green]Created {total_pages} pages in Notion![/bold green]")
+        for category, pages in created_pages.items():
+            if pages:
+                console.print(f"  {category.name}: {len(pages)} pages")
+    
+    except Exception as e:
+        console.print(f"[bold red]Error syncing to Notion:[/bold red] {str(e)}")
+
+
+@notion.command()
+def test_notion():
+    """Test Notion connection."""
+    from devjourney.notion.service import NotionService
+    
+    console.print("[bold]Testing Notion connection...[/bold]")
+    try:
+        notion_service = NotionService()
+        if notion_service.is_available():
+            console.print("[bold green]Notion API is available![/bold green]")
+        else:
+            console.print("[bold red]Notion API is not available![/bold red]")
+    except Exception as e:
+        console.print(f"[bold red]Error testing Notion connection:[/bold red] {str(e)}")
 
 
 def main():
