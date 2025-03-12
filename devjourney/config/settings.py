@@ -1,139 +1,193 @@
 """
-Configuration settings for the DevJourney application.
+Configuration settings for DevJourney.
 """
 import os
-import yaml
 import json
+import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Union, Any
-from pydantic import BaseModel, Field
+from typing import Dict, Any, Optional
 
-# Default paths
-HOME_DIR = Path.home()
-CONFIG_DIR = HOME_DIR / ".devjourney"
-CONFIG_FILE = CONFIG_DIR / "config.yaml"
-CACHE_DIR = CONFIG_DIR / "cache"
-LOG_DIR = CONFIG_DIR / "logs"
+logger = logging.getLogger(__name__)
 
-# Ensure directories exist
-CONFIG_DIR.mkdir(exist_ok=True)
-CACHE_DIR.mkdir(exist_ok=True)
-LOG_DIR.mkdir(exist_ok=True)
+# Default configuration
+DEFAULT_CONFIG = {
+    "version": "1.0.0",
+    "app": {
+        "name": "DevJourney",
+        "log_level": "INFO",
+        "data_dir": "~/.devjourney",
+    },
+    "ui": {
+        "theme": "dark",
+        "start_minimized": False,
+        "show_notifications": True,
+    },
+    "notion": {
+        "enabled": False,
+        "api_token": "",
+        "parent_page_id": "",
+        "sync_interval": 30,  # minutes
+    },
+    "extractors": {
+        "enabled": True,
+        "interval": 60,  # minutes
+        "cursor": {
+            "enabled": True,
+            "history_path": "~/Library/Application Support/Cursor/chat_history.json",
+        },
+        "claude": {
+            "enabled": False,
+            "api_key": "",
+        },
+    },
+    "analysis": {
+        "enabled": True,
+        "interval": 120,  # minutes
+        "llm": {
+            "provider": "ollama",
+            "model": "llama3",
+            "temperature": 0.7,
+            "max_tokens": 1000,
+        },
+    },
+    "storage": {
+        "type": "sqlite",
+        "path": "~/.devjourney/data.db",
+    },
+}
 
-# Default Cursor chat history path
-DEFAULT_CURSOR_CHAT_PATH = HOME_DIR / ".cursor" / "chat_history"
 
-
-class ExtractorConfig(BaseModel):
-    """Configuration for data extractors."""
-    claude_api_key: Optional[str] = Field(None, description="API key for Claude")
-    claude_enabled: bool = Field(True, description="Whether Claude extraction is enabled")
-    cursor_enabled: bool = Field(True, description="Whether Cursor extraction is enabled")
-    cursor_chat_path: Path = Field(
-        default=DEFAULT_CURSOR_CHAT_PATH, 
-        description="Path to Cursor chat history"
+def get_config_path() -> Path:
+    """Get the path to the config file."""
+    # Get config directory from environment or use default
+    config_dir = os.environ.get(
+        "DEVJOURNEY_CONFIG_DIR", 
+        os.path.expanduser(DEFAULT_CONFIG["app"]["data_dir"])
     )
-    extraction_frequency: int = Field(
-        60, 
-        description="Frequency of extraction in minutes"
-    )
-    max_history_days: int = Field(
-        30, 
-        description="Maximum number of days to extract history for"
-    )
+    
+    # Create directory if it doesn't exist
+    os.makedirs(config_dir, exist_ok=True)
+    
+    # Return path to config file
+    return Path(config_dir) / "config.json"
 
 
-class NotionConfig(BaseModel):
-    """Configuration for Notion integration."""
-    api_key: Optional[str] = Field(None, description="Notion API key")
-    enabled: bool = Field(True, description="Whether Notion integration is enabled")
-    database_id: Optional[str] = Field(None, description="Notion database ID")
-    sync_frequency: int = Field(
-        120, 
-        description="Frequency of Notion sync in minutes"
-    )
-    template_id: Optional[str] = Field(
-        None, 
-        description="Template ID for Notion database"
-    )
+def load_config() -> Dict[str, Any]:
+    """Load configuration from file or create default if not exists."""
+    config_path = get_config_path()
+    
+    # If config file exists, load it
+    if config_path.exists():
+        try:
+            with open(config_path, "r") as f:
+                loaded_config = json.load(f)
+            
+            logger.info(f"Loaded configuration from {config_path}")
+            
+            # Merge with default config to ensure all keys exist
+            return _merge_configs(DEFAULT_CONFIG, loaded_config)
+            
+        except Exception as e:
+            logger.error(f"Error loading config from {config_path}: {str(e)}")
+            logger.info("Using default configuration")
+            return DEFAULT_CONFIG
+    
+    # If config file doesn't exist, create it with default values
+    try:
+        with open(config_path, "w") as f:
+            json.dump(DEFAULT_CONFIG, f, indent=2)
+        
+        logger.info(f"Created default configuration at {config_path}")
+        return DEFAULT_CONFIG
+        
+    except Exception as e:
+        logger.error(f"Error creating config at {config_path}: {str(e)}")
+        logger.info("Using default configuration in memory")
+        return DEFAULT_CONFIG
 
 
-class LLMConfig(BaseModel):
-    """Configuration for LLM integration."""
-    provider: str = Field(
-        "ollama", 
-        description="LLM provider (ollama, claude, openai)"
-    )
-    model: str = Field(
-        "deepseek-r1", 
-        description="Model to use for analysis"
-    )
-    api_key: Optional[str] = Field(None, description="API key for cloud LLM")
-    temperature: float = Field(0.1, description="Temperature for LLM generation")
-    max_tokens: int = Field(2000, description="Maximum tokens for LLM generation")
-    fallback_providers: List[str] = Field(
-        default=["claude", "openai"], 
-        description="Fallback providers in order of preference"
-    )
+def save_config(config_data: Dict[str, Any]) -> bool:
+    """Save configuration to file.
+    
+    Args:
+        config_data: Configuration data to save
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    config_path = get_config_path()
+    
+    try:
+        with open(config_path, "w") as f:
+            json.dump(config_data, f, indent=2)
+        
+        logger.info(f"Saved configuration to {config_path}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error saving config to {config_path}: {str(e)}")
+        return False
 
 
-class UIConfig(BaseModel):
-    """Configuration for the user interface."""
-    theme: str = Field("system", description="UI theme (light, dark, system)")
-    start_minimized: bool = Field(False, description="Start application minimized")
-    show_notifications: bool = Field(True, description="Show desktop notifications")
-    auto_start: bool = Field(False, description="Start application on system startup")
+def _merge_configs(default: Dict[str, Any], user: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively merge user config with default config.
+    
+    This ensures all keys from default exist in the result,
+    while preserving user-specified values.
+    
+    Args:
+        default: Default configuration
+        user: User configuration
+        
+    Returns:
+        Merged configuration
+    """
+    result = default.copy()
+    
+    for key, value in user.items():
+        # If both values are dicts, merge them recursively
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _merge_configs(result[key], value)
+        # Otherwise, use the user value
+        else:
+            result[key] = value
+    
+    return result
 
 
-class CategoryConfig(BaseModel):
-    """Configuration for content categories."""
-    enabled_categories: List[str] = Field(
-        default=["Problem/Solution", "Learning", "Code Reference", "Meeting Notes"],
-        description="Enabled content categories"
-    )
-    custom_categories: List[str] = Field(
-        default=[],
-        description="Custom content categories"
-    )
-    technology_tags: List[str] = Field(
-        default=["JavaScript", "Python", "AWS", "React", "Node.js", "Docker"],
-        description="Technology tags"
-    )
-    custom_tags: List[str] = Field(
-        default=[],
-        description="Custom tags"
-    )
+def update_config(section: str, key: str, value: Any) -> bool:
+    """Update a specific configuration value.
+    
+    Args:
+        section: Configuration section (e.g., "notion")
+        key: Configuration key within section
+        value: New value
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # Load current config
+        current_config = config.copy()
+        
+        # Update value
+        if section in current_config:
+            current_config[section][key] = value
+        else:
+            current_config[section] = {key: value}
+        
+        # Save updated config
+        if save_config(current_config):
+            # Update in-memory config
+            config.update(current_config)
+            return True
+        
+        return False
+        
+    except Exception as e:
+        logger.error(f"Error updating config {section}.{key}: {str(e)}")
+        return False
 
 
-class AppConfig(BaseModel):
-    """Main application configuration."""
-    extractors: ExtractorConfig = Field(default_factory=ExtractorConfig)
-    notion: NotionConfig = Field(default_factory=NotionConfig)
-    llm: LLMConfig = Field(default_factory=LLMConfig)
-    ui: UIConfig = Field(default_factory=UIConfig)
-    categories: CategoryConfig = Field(default_factory=CategoryConfig)
-    debug_mode: bool = Field(False, description="Enable debug mode")
-    log_level: str = Field("INFO", description="Log level")
-
-
-def load_config() -> AppConfig:
-    """Load configuration from file or create default."""
-    if CONFIG_FILE.exists():
-        with open(CONFIG_FILE, "r") as f:
-            config_data = yaml.safe_load(f)
-            return AppConfig(**config_data)
-    else:
-        # Create default config
-        config = AppConfig()
-        save_config(config)
-        return config
-
-
-def save_config(config: AppConfig) -> None:
-    """Save configuration to file."""
-    with open(CONFIG_FILE, "w") as f:
-        yaml.dump(json.loads(config.model_dump_json()), f, default_flow_style=False)
-
-
-# Global config instance
+# Load configuration on module import
 config = load_config()

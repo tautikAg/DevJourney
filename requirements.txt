@@ -13,8 +13,11 @@ transformers>=4.36.0
 sentence-transformers>=2.2.2
 
 # UI components
-PyQt6>=6.6.0
-tqdm>=4.66.1
+rich>=13.7.0
+click>=8.1.7
+
+# Terminal UI
+textual>=0.40.0
 
 # File system monitoring
 watchdog>=3.0.0
@@ -29,5 +32,13 @@ asyncio>=3.4.3
 # Utilities
 python-dateutil>=2.8.2
 pytz>=2023.3.post1
-rich>=13.7.0
-click>=8.1.7
+tqdm>=4.66.1
+
+# Testing
+pytest>=7.4.3
+pytest-cov>=4.1.0
+
+# Type checking
+mypy>=1.7.1
+types-requests>=2.31.0.10
+types-PyYAML>=6.0.12.12

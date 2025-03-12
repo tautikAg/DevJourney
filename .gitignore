@@ -1,0 +1,17 @@
+env
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+
+devjourney.egg-info/
+
+# Notion
+notion_cache/
+
+# Logs
+logs/
