@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import httpx
 from pydantic import BaseModel
+import asyncio
 
 from devjourney.database import get_db
 from devjourney.models import (
@@ -69,7 +70,8 @@ class NotionClient:
         await self.client.aclose()
 
     async def _make_request(
-        self, method: str, path: str, json_data: Optional[Dict[str, Any]] = None
+        self, method: str, path: str, json_data: Optional[Dict[str, Any]] = None,
+        max_retries: int = 3, retry_delay: float = 1.0
     ) -> Dict[str, Any]:
         """Make a request to the Notion API.
         
@@ -77,6 +79,8 @@ class NotionClient:
             method: The HTTP method to use.
             path: The API path to request.
             json_data: The JSON data to send in the request body.
+            max_retries: Maximum number of retries for server errors.
+            retry_delay: Base delay between retries in seconds.
             
         Returns:
             The response data.
@@ -84,28 +88,75 @@ class NotionClient:
         Raises:
             NotionClientError: If the request fails.
         """
-        try:
-            response = await self.client.request(
-                method=method,
-                url=path,
-                json=json_data,
-            )
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            error_message = f"Notion API error: {e.response.status_code}"
+        last_exception = None
+        
+        for attempt in range(max_retries):
             try:
-                error_data = e.response.json()
-                if "message" in error_data:
-                    error_message = f"{error_message} - {error_data['message']}"
-            except Exception:
-                pass
-            
+                response = await self.client.request(
+                    method=method,
+                    url=path,
+                    json=json_data,
+                )
+                
+                # If we get a server error (5xx), retry
+                if 500 <= response.status_code < 600:
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                        logger.warning(f"Notion API server error: {response.status_code}. Retrying in {wait_time:.1f} seconds...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                
+                response.raise_for_status()
+                return response.json()
+                
+            except httpx.HTTPStatusError as e:
+                last_exception = e
+                error_message = f"Notion API error: {e.response.status_code}"
+                
+                try:
+                    error_data = e.response.json()
+                    if "message" in error_data:
+                        error_message = f"{error_message} - {error_data['message']}"
+                except Exception:
+                    pass
+                
+                # If it's a server error and we have retries left, retry
+                if 500 <= e.response.status_code < 600 and attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                    logger.warning(f"{error_message}. Retrying in {wait_time:.1f} seconds...")
+                    await asyncio.sleep(wait_time)
+                    continue
+                
+                logger.error(error_message)
+                raise NotionClientError(error_message)
+                
+            except httpx.RequestError as e:
+                last_exception = e
+                error_message = f"Notion API request failed: {e}"
+                
+                # Network errors are also retryable
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                    logger.warning(f"{error_message}. Retrying in {wait_time:.1f} seconds...")
+                    await asyncio.sleep(wait_time)
+                    continue
+                
+                logger.error(error_message)
+                raise NotionClientError(error_message)
+                
+            except Exception as e:
+                last_exception = e
+                logger.error(f"Notion API request failed: {e}")
+                raise NotionClientError(f"Notion API request failed: {e}")
+        
+        # If we've exhausted all retries
+        if last_exception:
+            error_message = f"Notion API request failed after {max_retries} attempts: {last_exception}"
             logger.error(error_message)
             raise NotionClientError(error_message)
-        except Exception as e:
-            logger.error(f"Notion API request failed: {e}")
-            raise NotionClientError(f"Notion API request failed: {e}")
+        
+        # This should never happen, but just in case
+        raise NotionClientError(f"Notion API request failed after {max_retries} attempts")
 
     async def get_user(self) -> Dict[str, Any]:
         """Get the current user.

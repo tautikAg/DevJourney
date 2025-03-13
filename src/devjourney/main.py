@@ -274,6 +274,7 @@ async def setup_notion():
     try:
         # First, search for existing pages to find one to use as a parent
         logger.info("Searching for a page to use as parent...")
+        
         search_results = await client._make_request(
             "POST",
             "/search",
@@ -300,7 +301,18 @@ async def setup_notion():
         
         # Use the first page as parent
         parent_page_id = search_results["results"][0]["id"]
-        parent_page_title = search_results["results"][0].get("properties", {}).get("title", {}).get("title", [{}])[0].get("text", {}).get("content", "Unknown Page")
+        
+        # Try to get the page title, but handle cases where the structure might be different
+        parent_page_title = "Unknown Page"
+        try:
+            if "properties" in search_results["results"][0]:
+                title_obj = search_results["results"][0]["properties"].get("title", {})
+                if "title" in title_obj and len(title_obj["title"]) > 0:
+                    parent_page_title = title_obj["title"][0].get("text", {}).get("content", "Unknown Page")
+        except Exception:
+            # If we can't get the title, just use the default
+            pass
+            
         logger.info(f"Using existing page '{parent_page_title}' with ID: {parent_page_id} as parent")
         
         # Set up the databases
@@ -323,8 +335,23 @@ async def setup_notion():
         logger.info(f"You can access them at: https://notion.so/{parent_page_id.replace('-', '')}")
         
         return True
+        
     except Exception as e:
-        logger.error(f"Failed to set up Notion workspace: {e}")
+        error_message = str(e)
+        logger.error(f"Failed to set up Notion workspace: {error_message}")
+        
+        # Check for specific error types and provide helpful messages
+        if "unauthorized" in error_message.lower() or "401" in error_message:
+            print("\nYour Notion API key appears to be invalid or expired.")
+            print("Please check that you've copied the correct Internal Integration Token from:")
+            print("https://www.notion.so/my-integrations")
+        elif "forbidden" in error_message.lower() or "403" in error_message:
+            print("\nYour Notion integration doesn't have permission to access the workspace.")
+            print("Make sure you've shared at least one page with the integration.")
+        elif "500" in error_message or "520" in error_message:
+            print("\nThe Notion API appears to be experiencing temporary issues.")
+            print("Please try again in a few minutes.")
+        
         return False
 
 
