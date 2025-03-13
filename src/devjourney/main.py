@@ -11,6 +11,8 @@ import sys
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
+from pathlib import Path
+from dotenv import load_dotenv
 
 from devjourney.database import get_db, init_db
 from devjourney.models import SyncStatus
@@ -19,6 +21,7 @@ from devjourney.mcp.client import ClaudeMCPClient
 from devjourney.analysis.main import run_analysis_job, process_specific_conversation
 from devjourney.analysis.insights import get_insights, get_daily_summary, get_insight_stats
 from devjourney.notion.sync import get_notion_sync
+from devjourney.notion.database import get_database_manager
 
 # Set up logging
 logging.basicConfig(
@@ -35,6 +38,9 @@ logger = logging.getLogger(__name__)
 
 def setup_environment():
     """Set up the environment for the application."""
+    # Load environment variables from .env file
+    load_dotenv()
+    
     # Initialize the database
     init_db()
     
@@ -47,6 +53,32 @@ def setup_environment():
     if not config:
         logger.error("Config not found. Please set up the config first.")
         sys.exit(1)
+    
+    # Update config with environment variables
+    env_updates = {}
+    
+    if os.getenv("NOTION_API_KEY"):
+        env_updates["notion_api_key"] = os.getenv("NOTION_API_KEY")
+    
+    if os.getenv("CLAUDE_API_KEY"):
+        env_updates["claude_api_key"] = os.getenv("CLAUDE_API_KEY")
+    
+    if os.getenv("NOTION_DAILY_LOG_DB_ID"):
+        env_updates["notion_daily_log_db_id"] = os.getenv("NOTION_DAILY_LOG_DB_ID")
+    
+    if os.getenv("NOTION_PROBLEM_SOLUTION_DB_ID"):
+        env_updates["notion_problem_solution_db_id"] = os.getenv("NOTION_PROBLEM_SOLUTION_DB_ID")
+    
+    if os.getenv("NOTION_KNOWLEDGE_BASE_DB_ID"):
+        env_updates["notion_knowledge_base_db_id"] = os.getenv("NOTION_KNOWLEDGE_BASE_DB_ID")
+    
+    if os.getenv("NOTION_PROJECT_TRACKING_DB_ID"):
+        env_updates["notion_project_tracking_db_id"] = os.getenv("NOTION_PROJECT_TRACKING_DB_ID")
+    
+    if env_updates:
+        db.update_config(**env_updates)
+        # Refresh config
+        config = db.get_config()
     
     # Check if the Notion API key is set
     if not config.notion_api_key:
@@ -206,6 +238,96 @@ def get_status() -> Dict[str, Any]:
     return status
 
 
+async def setup_notion():
+    """Set up Notion workspace with DevJourney page and databases."""
+    import asyncio
+    
+    logger.info("Setting up Notion workspace...")
+    
+    # Load environment variables from .env file
+    load_dotenv()
+    
+    # Check if Notion API key is set
+    db = get_db()
+    config = db.get_config()
+    
+    # Update config with environment variables
+    if os.getenv("NOTION_API_KEY"):
+        config.notion_api_key = os.getenv("NOTION_API_KEY")
+        db.update_config_object(config)
+    
+    if not config.notion_api_key:
+        logger.error("Notion API key is not set. Please set it in the .env file or update the config.")
+        print("\nTo set up Notion integration, you need to:")
+        print("1. Create a Notion integration at https://www.notion.so/my-integrations")
+        print("2. Copy the Internal Integration Token")
+        print("3. Add it to your .env file as NOTION_API_KEY=your_token_here")
+        print("4. Run this command again")
+        return False
+    
+    # Get the database manager
+    db_manager = await get_database_manager()
+    
+    # Get the Notion client
+    client = await db_manager.get_client()
+    
+    try:
+        # First, search for existing pages to find one to use as a parent
+        logger.info("Searching for a page to use as parent...")
+        search_results = await client._make_request(
+            "POST",
+            "/search",
+            {
+                "filter": {
+                    "property": "object",
+                    "value": "page"
+                }
+            }
+        )
+        
+        # Check if we have any pages in the results
+        if not search_results.get("results") or len(search_results.get("results")) == 0:
+            logger.error("No pages found in the workspace. Please create a page in Notion and share it with the integration.")
+            print("\nTo set up DevJourney in Notion, follow these steps:")
+            print("1. Go to your Notion workspace")
+            print("2. Click '+ New page' in the sidebar")
+            print("3. Create a page (e.g., name it 'DevJourney')")
+            print("4. Click 'Share' in the top right corner")
+            print("5. In the 'Add people, groups, or integrations' field, search for your integration name")
+            print("6. Select your integration and click 'Invite'")
+            print("7. Run this command again")
+            return False
+        
+        # Use the first page as parent
+        parent_page_id = search_results["results"][0]["id"]
+        parent_page_title = search_results["results"][0].get("properties", {}).get("title", {}).get("title", [{}])[0].get("text", {}).get("content", "Unknown Page")
+        logger.info(f"Using existing page '{parent_page_title}' with ID: {parent_page_id} as parent")
+        
+        # Set up the databases
+        logger.info("Setting up Notion databases...")
+        database_ids = await db_manager.setup_databases(parent_page_id)
+        
+        # Update the config with the database IDs
+        db = get_db()
+        config = db.get_config()
+        
+        config.notion_daily_log_db_id = database_ids["daily_log"]
+        config.notion_problem_solution_db_id = database_ids["problem_solution"]
+        config.notion_knowledge_base_db_id = database_ids["knowledge_base"]
+        config.notion_project_tracking_db_id = database_ids["project_tracking"]
+        
+        db.update_config_object(config)
+        
+        logger.info("Notion workspace set up successfully!")
+        logger.info(f"DevJourney databases have been created in your Notion workspace.")
+        logger.info(f"You can access them at: https://notion.so/{parent_page_id.replace('-', '')}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Failed to set up Notion workspace: {e}")
+        return False
+
+
 def main():
     """Main entry point for the application."""
     parser = argparse.ArgumentParser(description="DevJourney - Personal Progress Tracking System")
@@ -215,6 +337,9 @@ def main():
     
     # Setup command
     setup_parser = subparsers.add_parser("setup", help="Set up the environment")
+    
+    # Setup Notion command
+    setup_notion_parser = subparsers.add_parser("setup-notion", help="Set up Notion workspace with DevJourney page and databases")
     
     # Extract command
     extract_parser = subparsers.add_parser("extract", help="Extract conversations")
@@ -246,6 +371,14 @@ def main():
     # Run the appropriate command
     if args.command == "setup":
         setup_environment()
+    elif args.command == "setup-notion":
+        import asyncio
+        success = asyncio.run(setup_notion())
+        if success:
+            logger.info("Notion workspace set up successfully!")
+        else:
+            logger.error("Failed to set up Notion workspace.")
+            sys.exit(1)
     elif args.command == "extract":
         extract_conversations(days=args.days)
     elif args.command == "analyze":

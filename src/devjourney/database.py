@@ -113,6 +113,29 @@ class Database:
             session.refresh(config)
             return config
 
+    def update_config_object(self, config: AppConfig) -> AppConfig:
+        """Update the application configuration with a config object.
+        
+        Args:
+            config: The AppConfig object to update with.
+            
+        Returns:
+            The updated application configuration.
+        """
+        with self.session() as session:
+            existing_config = session.exec(select(AppConfig)).first()
+            if not existing_config:
+                session.add(config)
+            else:
+                # Update the existing config with values from the provided config
+                for key, value in config.dict().items():
+                    if hasattr(existing_config, key):
+                        setattr(existing_config, key, value)
+                config = existing_config
+            session.commit()
+            session.refresh(config)
+            return config
+
     def get_sync_status(self) -> SyncStatus:
         """Get the sync status.
         
