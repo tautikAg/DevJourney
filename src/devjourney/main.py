@@ -289,67 +289,24 @@ async def setup_notion():
         
         # Check if we have any pages in the results
         if not search_results.get("results") or len(search_results.get("results")) == 0:
-            logger.info("No pages found in the workspace. Creating a new page...")
+            logger.info("No pages found in the workspace. Please create a page manually.")
+            print("\nThe Notion API requires you to create a page manually and share it with the integration.")
+            print("Please follow these steps:")
+            print("1. Go to your Notion workspace")
+            print("2. Click '+ New page' in the sidebar")
+            print("3. Create a page (e.g., name it 'DevJourney')")
+            print("4. Click 'Share' in the top right corner")
+            print("5. In the 'Add people, groups, or integrations' field, search for your integration name (DevJourney)")
+            print("6. Select your integration and click 'Invite'")
+            print("7. Run this command again")
             
-            # Try to create a page directly in the workspace
-            try:
-                # First, get the list of workspaces
-                user_data = await client._make_request("GET", "/users/me")
-                bot_id = user_data.get("bot", {}).get("owner", {}).get("workspace_id")
-                
-                if not bot_id:
-                    logger.error("Could not determine workspace ID. Please create a page manually.")
-                    print("\nTo set up DevJourney in Notion, follow these steps:")
-                    print("1. Go to your Notion workspace")
-                    print("2. Click '+ New page' in the sidebar")
-                    print("3. Create a page (e.g., name it 'DevJourney')")
-                    print("4. Click 'Share' in the top right corner")
-                    print("5. In the 'Add people, groups, or integrations' field, search for your integration name")
-                    print("6. Select your integration and click 'Invite'")
-                    print("7. Run this command again")
-                    return False
-                
-                # Create a page in the workspace
-                parent_page = await client._make_request(
-                    "POST",
-                    "/pages",
-                    {
-                        "parent": {"type": "workspace", "workspace": True},
-                        "properties": {
-                            "title": [{"type": "text", "text": {"content": "DevJourney"}}]
-                        },
-                        "children": [
-                            {
-                                "object": "block",
-                                "type": "paragraph",
-                                "paragraph": {
-                                    "rich_text": [
-                                        {
-                                            "type": "text",
-                                            "text": {
-                                                "content": "Your personal development journey tracking system."
-                                            }
-                                        }
-                                    ]
-                                }
-                            }
-                        ]
-                    }
-                )
-                
-                parent_page_id = parent_page["id"]
-                logger.info(f"Created parent page with ID: {parent_page_id}")
-            except Exception as e:
-                logger.error(f"Failed to create a page: {e}")
-                print("\nCould not automatically create a page. Please create one manually:")
-                print("1. Go to your Notion workspace")
-                print("2. Click '+ New page' in the sidebar")
-                print("3. Create a page (e.g., name it 'DevJourney')")
-                print("4. Click 'Share' in the top right corner")
-                print("5. In the 'Add people, groups, or integrations' field, search for your integration name")
-                print("6. Select your integration and click 'Invite'")
-                print("7. Run this command again")
-                return False
+            # Print the integration name for reference
+            user_data = await client._make_request("GET", "/users/me")
+            bot_name = user_data.get("name", "Unknown")
+            logger.info(f"Your integration name is: {bot_name}")
+            print(f"\nYour integration name is: {bot_name}")
+            
+            return False
         else:
             # Use the first page as parent
             parent_page_id = search_results["results"][0]["id"]
