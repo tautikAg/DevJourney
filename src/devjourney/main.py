@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 from dotenv import load_dotenv
+import httpx
 
 from devjourney.database import get_db, init_db
 from devjourney.models import SyncStatus
@@ -355,6 +356,61 @@ async def setup_notion():
         return False
 
 
+async def test_notion_api():
+    """Test the Notion API connection directly."""
+    import asyncio
+    import httpx
+    
+    logger.info("Testing Notion API connection...")
+    
+    # Load environment variables from .env file
+    load_dotenv()
+    
+    # Get the API key from environment
+    api_key = os.getenv("NOTION_API_KEY")
+    
+    if not api_key:
+        logger.error("Notion API key is not set in the .env file.")
+        return False
+    
+    logger.info(f"Using API key: {api_key[:4]}...{api_key[-4:]}")
+    
+    # Make a direct request to the Notion API
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28",
+    }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://api.notion.com/v1/users/me",
+                headers=headers,
+                timeout=30.0,
+            )
+            
+            logger.info(f"Response status code: {response.status_code}")
+            
+            if response.status_code == 200:
+                user_data = response.json()
+                logger.info(f"Successfully connected to Notion API as user: {user_data.get('name', 'Unknown')}")
+                logger.info(f"User ID: {user_data.get('id', 'Unknown')}")
+                logger.info(f"Bot ID: {user_data.get('bot', {}).get('id', 'Unknown')}")
+                return True
+            else:
+                try:
+                    error_data = response.json()
+                    logger.error(f"Notion API error: {response.status_code} - {error_data.get('message', 'Unknown error')}")
+                except Exception:
+                    logger.error(f"Notion API error: {response.status_code}")
+                return False
+                
+    except Exception as e:
+        logger.error(f"Failed to connect to Notion API: {e}")
+        return False
+
+
 def main():
     """Main entry point for the application."""
     parser = argparse.ArgumentParser(description="DevJourney - Personal Progress Tracking System")
@@ -367,6 +423,9 @@ def main():
     
     # Setup Notion command
     setup_notion_parser = subparsers.add_parser("setup-notion", help="Set up Notion workspace with DevJourney page and databases")
+    
+    # Test Notion API command
+    test_notion_parser = subparsers.add_parser("test-notion-api", help="Test the Notion API connection")
     
     # Extract command
     extract_parser = subparsers.add_parser("extract", help="Extract conversations")
@@ -405,6 +464,14 @@ def main():
             logger.info("Notion workspace set up successfully!")
         else:
             logger.error("Failed to set up Notion workspace.")
+            sys.exit(1)
+    elif args.command == "test-notion-api":
+        import asyncio
+        success = asyncio.run(test_notion_api())
+        if success:
+            logger.info("Notion API connection test successful!")
+        else:
+            logger.error("Notion API connection test failed.")
             sys.exit(1)
     elif args.command == "extract":
         extract_conversations(days=args.days)
