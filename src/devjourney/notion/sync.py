@@ -8,6 +8,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
+import asyncio
 
 from devjourney.database import get_db
 from devjourney.models import (
@@ -580,11 +581,31 @@ class NotionSync:
             start_time = time.time()
             
             # Validate Notion databases
-            valid_databases = self.db_manager.validate_all_databases()
+            valid_databases = asyncio.run(self.db_manager.validate_all_databases())
             
             if not valid_databases:
                 # Set up the databases
-                self.db_manager.setup_databases()
+                # First, search for existing pages to find one to use as a parent
+                logger.info("Searching for a page to use as parent...")
+                search_results = asyncio.run(self.db_manager.client._make_request(
+                    "POST",
+                    "/search",
+                    {
+                        "filter": {
+                            "property": "object",
+                            "value": "page"
+                        }
+                    }
+                ))
+                
+                # Check if we have any pages in the results
+                if not search_results.get("results") or len(search_results.get("results")) == 0:
+                    logger.error("No pages found in the workspace. Please create a page manually.")
+                    raise NotionDatabaseError("No pages found in the workspace. Please create a page manually.")
+                
+                # Use the first page as parent
+                parent_page_id = search_results["results"][0]["id"]
+                asyncio.run(self.db_manager.setup_databases(parent_page_id))
             
             # Sync insights
             success_count, failure_count, error_messages = self.sync_insights(

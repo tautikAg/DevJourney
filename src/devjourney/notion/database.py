@@ -297,43 +297,43 @@ class NotionDatabaseManager:
             True if all databases are valid, False otherwise.
         """
         # Check if database IDs are configured
-        if not self.config.daily_log_database_id:
+        if not self.config.notion_daily_log_db_id:
             logger.warning("Daily log database ID is not configured")
             return False
         
-        if not self.config.problem_solution_database_id:
+        if not self.config.notion_problem_solution_db_id:
             logger.warning("Problem solution database ID is not configured")
             return False
         
-        if not self.config.knowledge_base_database_id:
+        if not self.config.notion_knowledge_base_db_id:
             logger.warning("Knowledge base database ID is not configured")
             return False
         
-        if not self.config.project_tracking_database_id:
+        if not self.config.notion_project_tracking_db_id:
             logger.warning("Project tracking database ID is not configured")
             return False
         
         # Update the schemas with the database IDs
-        DAILY_LOG_SCHEMA.database_id = self.config.daily_log_database_id
-        PROBLEM_SOLUTION_SCHEMA.database_id = self.config.problem_solution_database_id
-        KNOWLEDGE_BASE_SCHEMA.database_id = self.config.knowledge_base_database_id
-        PROJECT_TRACKING_SCHEMA.database_id = self.config.project_tracking_database_id
+        DAILY_LOG_SCHEMA.database_id = self.config.notion_daily_log_db_id
+        PROBLEM_SOLUTION_SCHEMA.database_id = self.config.notion_problem_solution_db_id
+        KNOWLEDGE_BASE_SCHEMA.database_id = self.config.notion_knowledge_base_db_id
+        PROJECT_TRACKING_SCHEMA.database_id = self.config.notion_project_tracking_db_id
         
         # Validate each database
         daily_log_valid = await self.validate_database_schema(
-            self.config.daily_log_database_id, DAILY_LOG_SCHEMA
+            self.config.notion_daily_log_db_id, DAILY_LOG_SCHEMA
         )
         
         problem_solution_valid = await self.validate_database_schema(
-            self.config.problem_solution_database_id, PROBLEM_SOLUTION_SCHEMA
+            self.config.notion_problem_solution_db_id, PROBLEM_SOLUTION_SCHEMA
         )
         
         knowledge_base_valid = await self.validate_database_schema(
-            self.config.knowledge_base_database_id, KNOWLEDGE_BASE_SCHEMA
+            self.config.notion_knowledge_base_db_id, KNOWLEDGE_BASE_SCHEMA
         )
         
         project_tracking_valid = await self.validate_database_schema(
-            self.config.project_tracking_database_id, PROJECT_TRACKING_SCHEMA
+            self.config.notion_project_tracking_db_id, PROJECT_TRACKING_SCHEMA
         )
         
         return daily_log_valid and problem_solution_valid and knowledge_base_valid and project_tracking_valid

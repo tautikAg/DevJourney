@@ -17,7 +17,7 @@ import httpx
 
 from devjourney.database import get_db, init_db
 from devjourney.models import SyncStatus
-from devjourney.extractors.cursor import get_cursor_extractor
+from devjourney.extractors.cursor_improved import get_cursor_extractor
 from devjourney.mcp.client import ClaudeMCPClient
 from devjourney.analysis.main import run_analysis_job, process_specific_conversation
 from devjourney.analysis.insights import get_insights, get_daily_summary, get_insight_stats
@@ -122,13 +122,15 @@ def extract_conversations(days: Optional[int] = None):
         cursor_conversations = []
     
     # Extract from Claude
+    claude_conversations = []
     try:
         claude_client = ClaudeMCPClient()
-        claude_conversations = claude_client.extract_conversations(days=days)
+        # Since Claude client is async, we need to handle it differently
+        import asyncio
+        claude_conversations = asyncio.run(claude_client.extract_conversations(days=days))
         logger.info(f"Extracted {len(claude_conversations)} conversations from Claude")
     except Exception as e:
         logger.error(f"Failed to extract conversations from Claude: {e}")
-        claude_conversations = []
     
     end_time = time.time()
     duration = end_time - start_time

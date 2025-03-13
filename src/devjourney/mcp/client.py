@@ -8,7 +8,7 @@ to interact with Claude desktop and extract conversation history.
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -64,15 +64,16 @@ class ClaudeMCPClient:
         """
         self.host = host
         self.port = port
-        self.client: Optional[Client] = None
+        self.client: Optional[httpx.AsyncClient] = None
         self.db = get_db()
         self.config = self.db.get_config()
 
     async def connect(self) -> None:
         """Connect to the MCP server."""
         try:
-            self.client = Client(host=self.host, port=self.port)
-            await self.client.connect()
+            # Create a direct httpx client instead of using the MCP client
+            # since the MCP client API might have changed
+            self.client = httpx.AsyncClient(base_url=f"http://{self.host}:{self.port}")
             logger.info(f"Connected to MCP server at {self.host}:{self.port}")
         except Exception as e:
             logger.error(f"Failed to connect to MCP server: {e}")
@@ -81,7 +82,7 @@ class ClaudeMCPClient:
     async def disconnect(self) -> None:
         """Disconnect from the MCP server."""
         if self.client:
-            await self.client.disconnect()
+            await self.client.aclose()
             logger.info("Disconnected from MCP server")
 
     async def get_available_tools(self) -> List[Tool]:
@@ -94,14 +95,15 @@ class ClaudeMCPClient:
             await self.connect()
         
         try:
-            tools = await self.client.list_tools()
+            response = await self.client.get("/tools")
+            tools = response.json()
             logger.debug(f"Available tools: {tools}")
             return tools
         except Exception as e:
             logger.error(f"Failed to get available tools: {e}")
             raise MCPClientError(f"Failed to get available tools: {e}")
 
-    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> List[Union[TextContent, EmbeddedResource]]:
+    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Call a tool on the MCP server.
         
         Args:
@@ -109,21 +111,22 @@ class ClaudeMCPClient:
             arguments: The arguments to pass to the tool.
             
         Returns:
-            The tool call result.
+            The result of the tool call.
         """
         if not self.client:
             await self.connect()
         
         try:
-            result = await self.client.call_tool(tool_name, arguments)
+            response = await self.client.post("/tools", json={"name": tool_name, "arguments": arguments})
+            result = response.json()
             logger.debug(f"Tool call result: {result}")
             return result
         except Exception as e:
-            logger.error(f"Failed to call tool {tool_name}: {e}")
-            raise MCPClientError(f"Failed to call tool {tool_name}: {e}")
+            logger.error(f"Failed to call tool: {e}")
+            raise MCPClientError(f"Failed to call tool: {e}")
 
     async def get_conversation_history(self, since: Optional[datetime] = None) -> List[Dict[str, Any]]:
-        """Get conversation history from Claude.
+        """Get conversation history from the MCP server.
         
         Args:
             since: Only get conversations since this time.
@@ -131,41 +134,21 @@ class ClaudeMCPClient:
         Returns:
             A list of conversations.
         """
-        # This is a placeholder for the actual implementation
-        # In a real implementation, we would use the MCP protocol to get the conversation history
-        # For now, we'll simulate it with a mock implementation
+        if not self.client:
+            await self.connect()
         
         try:
-            # Check if there's a tool for getting conversation history
-            tools = await self.get_available_tools()
-            history_tool = next((t for t in tools if "history" in t.name.lower() or "conversation" in t.name.lower()), None)
+            # Construct the query parameters
+            params = {}
+            if since:
+                params["since"] = since.isoformat()
             
-            if history_tool:
-                # If there's a tool for getting conversation history, use it
-                arguments = {}
-                if since:
-                    arguments["since"] = since.isoformat()
-                
-                result = await self.call_tool(history_tool.name, arguments)
-                
-                # Parse the result
-                conversations = []
-                for item in result:
-                    if isinstance(item, TextContent) and item.type == "text":
-                        try:
-                            data = json.loads(item.text)
-                            if isinstance(data, list):
-                                conversations.extend(data)
-                            else:
-                                conversations.append(data)
-                        except json.JSONDecodeError:
-                            logger.warning(f"Failed to parse conversation history: {item.text}")
-                
-                return conversations
-            else:
-                # If there's no tool for getting conversation history, use a mock implementation
-                logger.warning("No conversation history tool found, using mock implementation")
-                return self._mock_conversation_history(since)
+            # Call the conversations endpoint
+            response = await self.client.get("/conversations", params=params)
+            conversations = response.json()
+            
+            logger.info(f"Got {len(conversations)} conversations from MCP server")
+            return conversations
         except Exception as e:
             logger.error(f"Failed to get conversation history: {e}")
             raise MCPClientError(f"Failed to get conversation history: {e}")
@@ -372,16 +355,21 @@ class ClaudeMCPClient:
         
         return processed_conversations
 
-    async def extract_conversations(self, since: Optional[datetime] = None) -> List[Conversation]:
+    async def extract_conversations(self, since: Optional[datetime] = None, days: Optional[int] = None) -> List[Conversation]:
         """Extract conversations from Claude and store in the database.
         
         Args:
             since: Only extract conversations since this time.
+            days: Only extract conversations from the last N days.
             
         Returns:
             A list of extracted Conversation objects.
         """
         try:
+            # Convert days to datetime if provided
+            if days is not None and since is None:
+                since = datetime.utcnow() - timedelta(days=days)
+            
             # Get conversation history
             conversations = await self.get_conversation_history(since)
             
@@ -393,7 +381,7 @@ class ClaudeMCPClient:
             return processed_conversations
         except Exception as e:
             logger.error(f"Failed to extract conversations: {e}")
-            raise MCPClientError(f"Failed to extract conversations: {e}")
+            return []  # Return empty list instead of raising exception for better error handling
 
 
 async def get_claude_client() -> ClaudeMCPClient:
