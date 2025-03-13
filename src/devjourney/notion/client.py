@@ -70,15 +70,15 @@ class NotionClient:
         await self.client.aclose()
 
     async def _make_request(
-        self, method: str, path: str, json_data: Optional[Dict[str, Any]] = None,
+        self, method: str, endpoint: str, data: Optional[Dict[str, Any]] = None,
         max_retries: int = 3, retry_delay: float = 1.0
     ) -> Dict[str, Any]:
         """Make a request to the Notion API.
         
         Args:
             method: The HTTP method to use.
-            path: The API path to request.
-            json_data: The JSON data to send in the request body.
+            endpoint: The API endpoint to call.
+            data: The data to send with the request.
             max_retries: Maximum number of retries for server errors.
             retry_delay: Base delay between retries in seconds.
             
@@ -88,75 +88,47 @@ class NotionClient:
         Raises:
             NotionClientError: If the request fails.
         """
-        last_exception = None
+        url = f"{NOTION_API_BASE_URL}{endpoint}"
         
         for attempt in range(max_retries):
             try:
-                response = await self.client.request(
-                    method=method,
-                    url=path,
-                    json=json_data,
-                )
+                logger.debug(f"Making {method} request to {url}")
+                if data:
+                    logger.debug(f"Request data: {json.dumps(data, indent=2)}")
                 
-                # If we get a server error (5xx), retry
-                if 500 <= response.status_code < 600:
-                    if attempt < max_retries - 1:
-                        wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
-                        logger.warning(f"Notion API server error: {response.status_code}. Retrying in {wait_time:.1f} seconds...")
-                        await asyncio.sleep(wait_time)
-                        continue
-                
-                response.raise_for_status()
-                return response.json()
-                
-            except httpx.HTTPStatusError as e:
-                last_exception = e
-                error_message = f"Notion API error: {e.response.status_code}"
-                
-                try:
-                    error_data = e.response.json()
-                    if "message" in error_data:
-                        error_message = f"{error_message} - {error_data['message']}"
-                except Exception:
-                    pass
-                
-                # If it's a server error and we have retries left, retry
-                if 500 <= e.response.status_code < 600 and attempt < max_retries - 1:
-                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
-                    logger.warning(f"{error_message}. Retrying in {wait_time:.1f} seconds...")
-                    await asyncio.sleep(wait_time)
-                    continue
-                
-                logger.error(error_message)
-                raise NotionClientError(error_message)
-                
-            except httpx.RequestError as e:
-                last_exception = e
-                error_message = f"Notion API request failed: {e}"
-                
-                # Network errors are also retryable
+                async with httpx.AsyncClient() as client:
+                    response = await client.request(
+                        method,
+                        url,
+                        headers=self.headers,
+                        json=data,
+                        timeout=30.0,
+                    )
+                    
+                    logger.debug(f"Response status: {response.status_code}")
+                    
+                    if response.status_code == 200:
+                        return response.json()
+                    else:
+                        error_data = response.json() if response.content else {"message": "Unknown error"}
+                        logger.error(f"API error: {response.status_code} - {error_data}")
+                        
+                        if response.status_code == 429:
+                            # Rate limited, wait and retry
+                            retry_after = int(response.headers.get("Retry-After", "1"))
+                            logger.warning(f"Rate limited. Retrying after {retry_after} seconds.")
+                            await asyncio.sleep(retry_after)
+                            continue
+                        
+                        raise NotionClientError(f"API error: {response.status_code} - {error_data}")
+            except (httpx.RequestError, asyncio.TimeoutError) as e:
+                logger.error(f"Request error: {str(e)}")
                 if attempt < max_retries - 1:
-                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
-                    logger.warning(f"{error_message}. Retrying in {wait_time:.1f} seconds...")
-                    await asyncio.sleep(wait_time)
-                    continue
-                
-                logger.error(error_message)
-                raise NotionClientError(error_message)
-                
-            except Exception as e:
-                last_exception = e
-                logger.error(f"Notion API request failed: {e}")
-                raise NotionClientError(f"Notion API request failed: {e}")
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                else:
+                    raise NotionClientError(f"Request failed after {max_retries} attempts: {str(e)}")
         
-        # If we've exhausted all retries
-        if last_exception:
-            error_message = f"Notion API request failed after {max_retries} attempts: {last_exception}"
-            logger.error(error_message)
-            raise NotionClientError(error_message)
-        
-        # This should never happen, but just in case
-        raise NotionClientError(f"Notion API request failed after {max_retries} attempts")
+        raise NotionClientError(f"Request failed after {max_retries} attempts")
 
     async def get_user(self) -> Dict[str, Any]:
         """Get the current user.
@@ -224,6 +196,28 @@ class NotionClient:
         Returns:
             The created database.
         """
+        logger.info(f"Creating database '{title}' in parent page {parent_page_id}")
+        
+        # Log all property names to help debug
+        logger.debug(f"Properties before modification: {list(properties.keys())}")
+        
+        # Check if there's already any property with a title type
+        has_title_property = False
+        title_property_name = None
+        for prop_name, prop_value in properties.items():
+            if "title" in prop_value:
+                has_title_property = True
+                title_property_name = prop_name
+                logger.debug(f"Found title property: {prop_name}")
+                break
+        
+        # If no title property exists, add one
+        if not has_title_property:
+            logger.debug("No title property found, adding one")
+            properties["title"] = {"title": {}}
+        else:
+            logger.debug(f"Using existing title property: {title_property_name}")
+        
         data = {
             "parent": {"type": "page_id", "page_id": parent_page_id},
             "title": [{"type": "text", "text": {"content": title}}],
@@ -233,7 +227,15 @@ class NotionClient:
         if description:
             data["description"] = [{"type": "text", "text": {"content": description}}]
         
-        return await self._make_request("POST", "/databases", data)
+        logger.debug(f"Database creation data: {json.dumps(data, indent=2)}")
+        
+        try:
+            result = await self._make_request("POST", "/databases", data)
+            logger.info(f"Successfully created database '{title}' with ID: {result.get('id')}")
+            return result
+        except NotionClientError as e:
+            logger.error(f"Failed to create database '{title}': {str(e)}")
+            raise
 
     async def create_page(self, parent_id: str, properties: Dict[str, Any], content: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """Create a new page.

@@ -259,6 +259,39 @@ class Database:
             session.delete(item)
             session.commit()
 
+    def update_or_create_item(self, item: SQLModel, **filters: Any) -> SQLModel:
+        """Update an existing item or create a new one if it doesn't exist.
+        
+        Args:
+            item: The item to update or create.
+            **filters: Filters to find the existing item.
+            
+        Returns:
+            The updated or created item.
+        """
+        with self.session() as session:
+            # Try to find an existing item
+            query = select(type(item))
+            for attr, value in filters.items():
+                if hasattr(type(item), attr):
+                    query = query.where(getattr(type(item), attr) == value)
+            
+            existing_item = session.exec(query).first()
+            
+            if existing_item:
+                # Update the existing item
+                for key, value in item.dict().items():
+                    if hasattr(existing_item, key) and key != "id":
+                        setattr(existing_item, key, value)
+                item = existing_item
+            else:
+                # Create a new item
+                session.add(item)
+            
+            session.commit()
+            session.refresh(item)
+            return item
+
 
 # Global database instance
 db = Database()

@@ -467,6 +467,8 @@ def main():
         setup_environment()
     elif args.command == "setup-notion":
         import asyncio
+        # Set logging level to DEBUG for more detailed output
+        logging.getLogger("devjourney").setLevel(logging.DEBUG)
         success = asyncio.run(setup_notion())
         if success:
             logger.info("Notion workspace set up successfully!")
